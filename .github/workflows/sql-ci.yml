@@ -68,7 +68,8 @@ jobs:
                PRINT 'PASS: Procedure executes successfully';
                "
 
-  # ─── CD JOB ───────────────────────────────────────
+ 
+ # ─── CD JOB ───────────────────────────────────────
   deploy-dev:
     runs-on: self-hosted
     needs: validate-sql
@@ -85,6 +86,7 @@ jobs:
                -U "${{ secrets.DEV_USER }}" `
                -P "${{ secrets.DEV_PASSWORD }}" `
                -d MyFirstCICD_DEV `
+               -No `
                -i Migrations\V001__initial_schema.sql
 
     - name: Verify DEV deployment
@@ -93,6 +95,7 @@ jobs:
                -U "${{ secrets.DEV_USER }}" `
                -P "${{ secrets.DEV_PASSWORD }}" `
                -d MyFirstCICD_DEV `
+               -No `
                -Q "
                IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees')
                    PRINT 'PASS: Employees table deployed to DEV';
