@@ -51,25 +51,58 @@ jobs:
                -d TestDB_CI `
                -i Migrations\V001__initial_schema.sql
 
+    - name: Run migration V002
+      run: |
+        sqlcmd -S "(localdb)\MSSQLLocalDB" `
+               -d TestDB_CI `
+               -i Migrations\V002__add_email_phone_departments.sql
+
     - name: Run validation tests
       run: |
         sqlcmd -S "(localdb)\MSSQLLocalDB" `
                -d TestDB_CI `
                -Q "
+               -- V001 checks
                IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees')
                    RAISERROR('FAIL: Employees table not found', 16, 1);
                ELSE PRINT 'PASS: Employees table exists';
 
                IF NOT EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetEmployees')
-                   RAISERROR('FAIL: Procedure not found', 16, 1);
+                   RAISERROR('FAIL: usp_GetEmployees not found', 16, 1);
                ELSE PRINT 'PASS: usp_GetEmployees exists';
 
+               -- V002 checks
+               IF NOT EXISTS (
+                   SELECT 1 FROM sys.columns
+                   WHERE object_id = OBJECT_ID('dbo.Employees')
+                   AND name = 'Email')
+                   RAISERROR('FAIL: Email column not found', 16, 1);
+               ELSE PRINT 'PASS: Email column exists';
+
+               IF NOT EXISTS (
+                   SELECT 1 FROM sys.columns
+                   WHERE object_id = OBJECT_ID('dbo.Employees')
+                   AND name = 'Phone')
+                   RAISERROR('FAIL: Phone column not found', 16, 1);
+               ELSE PRINT 'PASS: Phone column exists';
+
+               IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Departments')
+                   RAISERROR('FAIL: Departments table not found', 16, 1);
+               ELSE PRINT 'PASS: Departments table exists';
+
+               IF NOT EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetDepartments')
+                   RAISERROR('FAIL: usp_GetDepartments not found', 16, 1);
+               ELSE PRINT 'PASS: usp_GetDepartments exists';
+
+               -- Run procedures
                EXEC dbo.usp_GetEmployees;
-               PRINT 'PASS: Procedure executes successfully';
+               PRINT 'PASS: usp_GetEmployees runs successfully';
+
+               EXEC dbo.usp_GetDepartments;
+               PRINT 'PASS: usp_GetDepartments runs successfully';
                "
 
- 
- # ─── CD JOB ───────────────────────────────────────
+  # ─── CD JOB ───────────────────────────────────────
   deploy-dev:
     runs-on: self-hosted
     needs: validate-sql
@@ -80,14 +113,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Deploy V001 to DEV
+    - name: Deploy V002 to DEV
       run: |
         sqlcmd -S "DHARANI-NOC\SECOND" `
                -U "${{ secrets.DEV_USER }}" `
                -P "${{ secrets.DEV_PASSWORD }}" `
                -d MyFirstCICD_DEV `
                -No `
-               -i Migrations\V001__initial_schema.sql
+               -i Migrations\V002__add_email_phone_departments.sql
 
     - name: Verify DEV deployment
       run: |
@@ -97,16 +130,18 @@ jobs:
                -d MyFirstCICD_DEV `
                -No `
                -Q "
-               IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees')
-                   PRINT 'PASS: Employees table deployed to DEV';
+               IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Departments')
+                   PRINT 'PASS: Departments table deployed to DEV';
                ELSE
-                   RAISERROR('FAIL: Table missing in DEV', 16, 1);
+                   RAISERROR('FAIL: Departments table missing in DEV', 16, 1);
 
-               IF EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetEmployees')
-                   PRINT 'PASS: Procedure deployed to DEV';
+               IF EXISTS (SELECT 1 FROM sys.columns
+                          WHERE object_id = OBJECT_ID('dbo.Employees')
+                          AND name = 'Email')
+                   PRINT 'PASS: Email column deployed to DEV';
                ELSE
-                   RAISERROR('FAIL: Procedure missing in DEV', 16, 1);
+                   RAISERROR('FAIL: Email column missing in DEV', 16, 1);
 
-               SELECT 'DEV Deployment Complete' AS Status,
+               SELECT 'V002 DEV Deployment Complete' AS Status,
                       GETDATE() AS DeployedAt;
                "
