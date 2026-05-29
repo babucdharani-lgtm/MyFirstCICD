@@ -17,13 +17,31 @@ jobs:
 
     - name: Start SQL Server LocalDB
       run: |
-        sqllocaldb create MSSQLLocalDB 2019 -s
+        sqllocaldb create MSSQLLocalDB -s
+        sqllocaldb start MSSQLLocalDB
+        Start-Sleep -Seconds 15
         sqllocaldb info MSSQLLocalDB
+
+    - name: Wait for LocalDB to be ready
+      run: |
+        $retries = 10
+        $delay = 5
+        for ($i = 1; $i -le $retries; $i++) {
+          try {
+            sqlcmd -S "(localdb)\MSSQLLocalDB" -Q "SELECT 1" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "SQL Server LocalDB is ready!"
+              break
+            }
+          } catch {}
+          Write-Host "Waiting for LocalDB... attempt $i of $retries"
+          Start-Sleep -Seconds $delay
+        }
 
     - name: Create test database
       run: |
         sqlcmd -S "(localdb)\MSSQLLocalDB" `
-               -Q "CREATE DATABASE TestDB_CI"
+               -Q "IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'TestDB_CI') CREATE DATABASE TestDB_CI"
 
     - name: Run migration script
       run: |
