@@ -1,4 +1,4 @@
-name: SQL Server CI
+name: SQL Server CI/CD
 
 on:
   push:
@@ -7,6 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
+
+  # ─── CI JOB ───────────────────────────────────────
   validate-sql:
     runs-on: windows-latest
 
@@ -43,7 +45,7 @@ jobs:
         sqlcmd -S "(localdb)\MSSQLLocalDB" `
                -Q "IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'TestDB_CI') CREATE DATABASE TestDB_CI"
 
-    - name: Run migration script
+    - name: Run migration V001
       run: |
         sqlcmd -S "(localdb)\MSSQLLocalDB" `
                -d TestDB_CI `
@@ -64,4 +66,44 @@ jobs:
 
                EXEC dbo.usp_GetEmployees;
                PRINT 'PASS: Procedure executes successfully';
+               "
+
+  # ─── CD JOB ───────────────────────────────────────
+  deploy-dev:
+    runs-on: windows-latest
+    needs: validate-sql
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy V001 to DEV
+      run: |
+        sqlcmd -S "${{ secrets.DEV_SERVER }}" `
+               -U "${{ secrets.DEV_USER }}" `
+               -P "${{ secrets.DEV_PASSWORD }}" `
+               -d MyFirstCICD_DEV `
+               -i Migrations\V001__initial_schema.sql
+
+    - name: Verify DEV deployment
+      run: |
+        sqlcmd -S "${{ secrets.DEV_SERVER }}" `
+               -U "${{ secrets.DEV_USER }}" `
+               -P "${{ secrets.DEV_PASSWORD }}" `
+               -d MyFirstCICD_DEV `
+               -Q "
+               IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees')
+                   PRINT 'PASS: Employees table deployed to DEV';
+               ELSE
+                   RAISERROR('FAIL: Table missing in DEV', 16, 1);
+
+               IF EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetEmployees')
+                   PRINT 'PASS: Procedure deployed to DEV';
+               ELSE
+                   RAISERROR('FAIL: Procedure missing in DEV', 16, 1);
+
+               SELECT 'DEV Deployment Complete' AS Status,
+                      GETDATE() AS DeployedAt;
                "
