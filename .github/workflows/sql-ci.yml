@@ -1,0 +1,49 @@
+name: SQL Server CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-sql:
+    runs-on: windows-latest
+
+    steps:
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Start SQL Server LocalDB
+      run: |
+        sqllocaldb create MSSQLLocalDB 2019 -s
+        sqllocaldb info MSSQLLocalDB
+
+    - name: Create test database
+      run: |
+        sqlcmd -S "(localdb)\MSSQLLocalDB" `
+               -Q "CREATE DATABASE TestDB_CI"
+
+    - name: Run migration script
+      run: |
+        sqlcmd -S "(localdb)\MSSQLLocalDB" `
+               -d TestDB_CI `
+               -i Migrations\V001__initial_schema.sql
+
+    - name: Run validation tests
+      run: |
+        sqlcmd -S "(localdb)\MSSQLLocalDB" `
+               -d TestDB_CI `
+               -Q "
+               IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees')
+                   RAISERROR('FAIL: Employees table not found', 16, 1);
+               ELSE PRINT 'PASS: Employees table exists';
+
+               IF NOT EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetEmployees')
+                   RAISERROR('FAIL: Procedure not found', 16, 1);
+               ELSE PRINT 'PASS: usp_GetEmployees exists';
+
+               EXEC dbo.usp_GetEmployees;
+               PRINT 'PASS: Procedure executes successfully';
+               "
