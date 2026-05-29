@@ -70,7 +70,7 @@ jobs:
 
   # ─── CD JOB ───────────────────────────────────────
   deploy-dev:
-    runs-on: windows-latest
+    runs-on: self-hosted
     needs: validate-sql
     if: github.ref == 'refs/heads/main'
 
@@ -81,7 +81,7 @@ jobs:
 
     - name: Deploy V001 to DEV
       run: |
-        sqlcmd -S "${{ secrets.DEV_SERVER }}" `
+        sqlcmd -S "DHARANI-NOC\SECOND" `
                -U "${{ secrets.DEV_USER }}" `
                -P "${{ secrets.DEV_PASSWORD }}" `
                -d MyFirstCICD_DEV `
@@ -89,7 +89,7 @@ jobs:
 
     - name: Verify DEV deployment
       run: |
-        sqlcmd -S "${{ secrets.DEV_SERVER }}" `
+        sqlcmd -S "DHARANI-NOC\SECOND" `
                -U "${{ secrets.DEV_USER }}" `
                -P "${{ secrets.DEV_PASSWORD }}" `
                -d MyFirstCICD_DEV `
