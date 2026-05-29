@@ -57,49 +57,59 @@ jobs:
                -d TestDB_CI `
                -i Migrations\V002__add_email_phone_departments.sql
 
-    - name: Run validation tests
+    - name: Enable CLR and install tSQLt
+      run: |
+        sqlcmd -S "(localdb)\MSSQLLocalDB" `
+               -Q "
+               EXEC sp_configure 'clr enabled', 1;
+               RECONFIGURE;
+               EXEC sp_configure 'clr strict security', 0;
+               RECONFIGURE;
+               ALTER DATABASE TestDB_CI SET TRUSTWORTHY ON;
+               "
+        sqlcmd -S "(localdb)\MSSQLLocalDB" `
+               -d TestDB_CI `
+               -i tSQLt\tSQLt.class.sql
+
+    - name: Run tSQLt unit tests
+      run: |
+        sqlcmd -S "(localdb)\MSSQLLocalDB" `
+               -d TestDB_CI `
+               -i Tests\tSQLt_Tests.sql
+
+    - name: Check all tests passed
       run: |
         sqlcmd -S "(localdb)\MSSQLLocalDB" `
                -d TestDB_CI `
                -Q "
-               -- V001 checks
-               IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees')
-                   RAISERROR('FAIL: Employees table not found', 16, 1);
-               ELSE PRINT 'PASS: Employees table exists';
+               DECLARE @FailCount INT;
+               SELECT @FailCount = COUNT(*)
+               FROM tSQLt.TestResult
+               WHERE Result = 'Failure';
 
-               IF NOT EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetEmployees')
-                   RAISERROR('FAIL: usp_GetEmployees not found', 16, 1);
-               ELSE PRINT 'PASS: usp_GetEmployees exists';
+               IF @FailCount > 0
+               BEGIN
+                   SELECT
+                       Name        AS FailedTest,
+                       Result,
+                       Msg         AS ErrorMessage
+                   FROM tSQLt.TestResult
+                   WHERE Result = 'Failure';
 
-               -- V002 checks
-               IF NOT EXISTS (
-                   SELECT 1 FROM sys.columns
-                   WHERE object_id = OBJECT_ID('dbo.Employees')
-                   AND name = 'Email')
-                   RAISERROR('FAIL: Email column not found', 16, 1);
-               ELSE PRINT 'PASS: Email column exists';
+                   RAISERROR('UNIT TESTS FAILED — %d test(s) failed. Deployment blocked!', 16, 1, @FailCount);
+               END
+               ELSE
+               BEGIN
+                   SELECT
+                       Name    AS TestName,
+                       Result
+                   FROM tSQLt.TestResult
+                   ORDER BY Name;
 
-               IF NOT EXISTS (
-                   SELECT 1 FROM sys.columns
-                   WHERE object_id = OBJECT_ID('dbo.Employees')
-                   AND name = 'Phone')
-                   RAISERROR('FAIL: Phone column not found', 16, 1);
-               ELSE PRINT 'PASS: Phone column exists';
-
-               IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Departments')
-                   RAISERROR('FAIL: Departments table not found', 16, 1);
-               ELSE PRINT 'PASS: Departments table exists';
-
-               IF NOT EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetDepartments')
-                   RAISERROR('FAIL: usp_GetDepartments not found', 16, 1);
-               ELSE PRINT 'PASS: usp_GetDepartments exists';
-
-               -- Run procedures
-               EXEC dbo.usp_GetEmployees;
-               PRINT 'PASS: usp_GetEmployees runs successfully';
-
-               EXEC dbo.usp_GetDepartments;
-               PRINT 'PASS: usp_GetDepartments runs successfully';
+                   PRINT '================================================';
+                   PRINT 'ALL UNIT TESTS PASSED — safe to deploy!';
+                   PRINT '================================================';
+               END
                "
 
   # ─── CD JOB ───────────────────────────────────────
@@ -142,6 +152,6 @@ jobs:
                ELSE
                    RAISERROR('FAIL: Email column missing in DEV', 16, 1);
 
-               SELECT 'V002 DEV Deployment Complete' AS Status,
+               SELECT 'DEV Deployment Complete' AS Status,
                       GETDATE() AS DeployedAt;
                "
