@@ -198,7 +198,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Backup PROD database before deployment
+    - name: Backup PROD before deployment
       run: |
         $BackupPath = "C:\SQLBackups\MyFirstCICD_PROD_$(Get-Date -Format 'yyyyMMdd_HHmmss').bak"
         New-Item -ItemType Directory -Force -Path "C:\SQLBackups"
@@ -210,7 +210,7 @@ jobs:
                BACKUP DATABASE MyFirstCICD_PROD
                TO DISK = '$BackupPath'
                WITH FORMAT, INIT, COMPRESSION;
-               PRINT 'PROD backup completed: $BackupPath';
+               PRINT 'Backup completed successfully';
                "
 
     - name: Deploy V001 to PROD
@@ -232,6 +232,7 @@ jobs:
                -i Migrations\V002__add_email_phone_departments.sql
 
     - name: Verify PROD deployment
+      id: verify
       run: |
         sqlcmd -S "DHARANI-NOC\SECOND" `
                -U "${{ secrets.PROD_USER }}" `
@@ -239,28 +240,37 @@ jobs:
                -d MyFirstCICD_PROD `
                -No `
                -Q "
-               IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees')
-                   PRINT 'PASS: Employees table deployed to PROD';
-               ELSE
-                   RAISERROR('FAIL: Employees table missing in PROD', 16, 1);
+               IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees')
+                   RAISERROR('FAIL: Employees missing', 16, 1);
 
-               IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Departments')
-                   PRINT 'PASS: Departments table deployed to PROD';
-               ELSE
-                   RAISERROR('FAIL: Departments table missing in PROD', 16, 1);
+               IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Departments')
+                   RAISERROR('FAIL: Departments missing', 16, 1);
 
-               IF EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetEmployees')
-                   PRINT 'PASS: usp_GetEmployees deployed to PROD';
-               ELSE
-                   RAISERROR('FAIL: usp_GetEmployees missing in PROD', 16, 1);
+               IF NOT EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetEmployees')
+                   RAISERROR('FAIL: usp_GetEmployees missing', 16, 1);
 
-               IF EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetDepartments')
-                   PRINT 'PASS: usp_GetDepartments deployed to PROD';
-               ELSE
-                   RAISERROR('FAIL: usp_GetDepartments missing in PROD', 16, 1);
+               IF NOT EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'usp_GetDepartments')
+                   RAISERROR('FAIL: usp_GetDepartments missing', 16, 1);
 
-               SELECT
-                   'PROD Deployment Complete'  AS Status,
-                   GETDATE()                   AS DeployedAt,
-                   SYSTEM_USER                 AS DeployedBy;
+               PRINT 'ALL VERIFICATIONS PASSED';
+               SELECT 'PROD Deployment Complete' AS Status,
+                      GETDATE() AS DeployedAt;
                "
+
+    - name: Rollback PROD if verification failed
+      if: failure()
+      run: |
+        Write-Host "DEPLOYMENT FAILED — Starting automatic rollback..."
+        sqlcmd -S "DHARANI-NOC\SECOND" `
+               -U "${{ secrets.PROD_USER }}" `
+               -P "${{ secrets.PROD_PASSWORD }}" `
+               -d MyFirstCICD_PROD `
+               -No `
+               -i Rollback\V002__rollback.sql
+        sqlcmd -S "DHARANI-NOC\SECOND" `
+               -U "${{ secrets.PROD_USER }}" `
+               -P "${{ secrets.PROD_PASSWORD }}" `
+               -d MyFirstCICD_PROD `
+               -No `
+               -i Rollback\V001__rollback.sql
+        Write-Host "ROLLBACK COMPLETED — PROD restored to previous state"
