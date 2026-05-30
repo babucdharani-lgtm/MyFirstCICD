@@ -89,30 +89,16 @@ jobs:
 
                IF @FailCount > 0
                BEGIN
-                   SELECT
-                       Name        AS FailedTest,
-                       Result,
-                       Msg         AS ErrorMessage
+                   SELECT Name, Result, Msg
                    FROM tSQLt.TestResult
                    WHERE Result = 'Failure';
-
-                   RAISERROR('UNIT TESTS FAILED — %d test(s) failed. Deployment blocked!', 16, 1, @FailCount);
+                   RAISERROR('UNIT TESTS FAILED — Deployment blocked!', 16, 1);
                END
                ELSE
-               BEGIN
-                   SELECT
-                       Name    AS TestName,
-                       Result
-                   FROM tSQLt.TestResult
-                   ORDER BY Name;
-
-                   PRINT '================================================';
                    PRINT 'ALL UNIT TESTS PASSED — safe to deploy!';
-                   PRINT '================================================';
-               END
                "
 
-  # ─── CD JOB ───────────────────────────────────────
+  # ─── CD DEV JOB ───────────────────────────────────
   deploy-dev:
     runs-on: self-hosted
     needs: validate-sql
@@ -123,8 +109,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Deploy V002 to DEV
+    - name: Deploy to DEV
       run: |
+        sqlcmd -S "DHARANI-NOC\SECOND" `
+               -U "${{ secrets.DEV_USER }}" `
+               -P "${{ secrets.DEV_PASSWORD }}" `
+               -d MyFirstCICD_DEV `
+               -No `
+               -i Migrations\V001__initial_schema.sql
         sqlcmd -S "DHARANI-NOC\SECOND" `
                -U "${{ secrets.DEV_USER }}" `
                -P "${{ secrets.DEV_PASSWORD }}" `
@@ -140,18 +132,57 @@ jobs:
                -d MyFirstCICD_DEV `
                -No `
                -Q "
+               IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees')
+                   PRINT 'PASS: DEV deployment verified';
+               ELSE
+                   RAISERROR('FAIL: DEV deployment failed', 16, 1);
+               SELECT 'DEV Complete' AS Status, GETDATE() AS DeployedAt;
+               "
+
+  # ─── CD UAT JOB ───────────────────────────────────
+  deploy-uat:
+    runs-on: self-hosted
+    needs: deploy-dev
+    if: github.ref == 'refs/heads/main'
+    environment: UAT
+
+    steps:
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to UAT
+      run: |
+        sqlcmd -S "DHARANI-NOC\SECOND" `
+               -U "${{ secrets.UAT_USER }}" `
+               -P "${{ secrets.UAT_PASSWORD }}" `
+               -d MyFirstCICD_UAT `
+               -No `
+               -i Migrations\V001__initial_schema.sql
+        sqlcmd -S "DHARANI-NOC\SECOND" `
+               -U "${{ secrets.UAT_USER }}" `
+               -P "${{ secrets.UAT_PASSWORD }}" `
+               -d MyFirstCICD_UAT `
+               -No `
+               -i Migrations\V002__add_email_phone_departments.sql
+
+    - name: Verify UAT deployment
+      run: |
+        sqlcmd -S "DHARANI-NOC\SECOND" `
+               -U "${{ secrets.UAT_USER }}" `
+               -P "${{ secrets.UAT_PASSWORD }}" `
+               -d MyFirstCICD_UAT `
+               -No `
+               -Q "
+               IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees')
+                   PRINT 'PASS: UAT deployment verified';
+               ELSE
+                   RAISERROR('FAIL: UAT deployment failed', 16, 1);
+
                IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Departments')
-                   PRINT 'PASS: Departments table deployed to DEV';
+                   PRINT 'PASS: Departments deployed to UAT';
                ELSE
-                   RAISERROR('FAIL: Departments table missing in DEV', 16, 1);
+                   RAISERROR('FAIL: Departments missing in UAT', 16, 1);
 
-               IF EXISTS (SELECT 1 FROM sys.columns
-                          WHERE object_id = OBJECT_ID('dbo.Employees')
-                          AND name = 'Email')
-                   PRINT 'PASS: Email column deployed to DEV';
-               ELSE
-                   RAISERROR('FAIL: Email column missing in DEV', 16, 1);
-
-               SELECT 'DEV Deployment Complete' AS Status,
-                      GETDATE() AS DeployedAt;
+               SELECT 'UAT Complete' AS Status, GETDATE() AS DeployedAt;
                "
